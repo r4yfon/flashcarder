@@ -1,0 +1,241 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { ChevronLeft, Edit, Trash2, AlertCircle, BookOpen } from 'lucide-svelte';
+	import type { PageData } from './$types';
+
+	export let data: PageData;
+
+	let loading = true;
+	let error = '';
+	let note = data.note;
+
+	let generating = false;
+	let generationSuccess = '';
+	let generationError = '';
+
+	onMount(() => {
+		loading = false;
+	});
+
+	async function generateFlashcardsForNote() {
+		if (!note?.id) return;
+
+		// Prompt for the number of flashcards
+		const countInput = prompt('How many flashcards would you like to generate? (5-30)', '5');
+		if (countInput === null) return; // User cancelled
+
+		const count = parseInt(countInput, 10);
+		if (isNaN(count) || count < 1 || count > 50) {
+			generationError = 'Please enter a valid number between 1 and 50.';
+			generationSuccess = '';
+			return;
+		}
+
+		generating = true;
+		generationSuccess = '';
+		generationError = '';
+
+		try {
+			const response = await fetch('/api/flashcards', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({
+					noteId: note.id,
+					count: count // Use the prompted count
+				})
+			});
+
+			const responseData = await response.json(); // Renamed to avoid conflict with `data` prop
+
+			if (!response.ok) {
+				throw new Error(responseData.error || 'Failed to generate flashcards');
+			}
+
+			generationSuccess = `Successfully generated ${responseData.flashcards?.length || 0} flashcards!`;
+		} catch (err) {
+			generationError = err instanceof Error ? err.message : 'An error occurred during generation';
+		} finally {
+			generating = false;
+		}
+	}
+
+	async function deleteNote() {
+		if (!confirm('Are you sure you want to delete this note?')) {
+			return;
+		}
+
+		try {
+			const response = await fetch('/api/notes', {
+				method: 'DELETE',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({ id: note.id })
+			});
+
+			if (!response.ok) {
+				throw new Error('Failed to delete note');
+			}
+
+			// Redirect to notes list
+			window.location.href = '/notes';
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to delete note';
+		}
+	}
+
+	function formatDate(dateStr: string | Date) {
+		if (!dateStr) return '';
+		const date = new Date(dateStr);
+		return date.toLocaleDateString('en-US', {
+			year: 'numeric',
+			month: 'short',
+			day: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit'
+		});
+	}
+</script>
+
+<div class="mx-auto max-w-4xl py-6">
+	<div class="mb-6">
+		<a href="/notes" class="inline-flex items-center text-indigo-600 hover:text-indigo-800">
+			<ChevronLeft class="mr-1 h-4 w-4" />
+			Back to Notes
+		</a>
+	</div>
+
+	{#if error}
+		<div class="mb-6 flex items-start rounded-md border border-red-200 bg-red-50 p-4">
+			<AlertCircle class="mt-0.5 mr-3 h-5 w-5 flex-shrink-0 text-red-500" />
+			<p class="text-red-800">{error}</p>
+		</div>
+	{/if}
+
+	{#if loading}
+		<div class="flex justify-center py-12">
+			<svg
+				class="h-8 w-8 animate-spin text-indigo-500"
+				xmlns="http://www.w3.org/2000/svg"
+				fill="none"
+				viewBox="0 0 24 24"
+			>
+				<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"
+				></circle>
+				<path
+					class="opacity-75"
+					fill="currentColor"
+					d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+				></path>
+			</svg>
+		</div>
+	{:else if !note}
+		<div class="rounded-lg border border-gray-200 bg-white p-6 text-center shadow-sm">
+			<AlertCircle class="mx-auto mb-4 h-12 w-12 text-red-400" />
+			<h3 class="mb-2 text-lg font-medium text-gray-900">Note Not Found</h3>
+			<p class="mb-4 text-gray-500">The note you're looking for doesn't exist or was deleted.</p>
+			<a
+				href="/notes"
+				class="inline-flex items-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:outline-none"
+			>
+				<ChevronLeft class="mr-2 h-4 w-4" />
+				Return to Notes
+			</a>
+		</div>
+	{:else}
+		<div class="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-md">
+			<div class="p-6">
+				<div class="mb-6 flex flex-col sm:flex-row sm:items-start sm:justify-between">
+					<div>
+						<h1 class="text-2xl font-bold text-gray-900">{note.title || 'Untitled Note'}</h1>
+						<p class="mt-1 text-sm text-gray-500">Created {formatDate(note.createdAt || '')}</p>
+					</div>
+					<div class="mt-4 flex space-x-2 sm:mt-0">
+						<button
+							on:click={deleteNote}
+							class="inline-flex items-center rounded-md border border-red-300 bg-white px-3 py-2 text-sm font-medium text-red-700 shadow-sm hover:bg-red-50 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:outline-none"
+						>
+							<Trash2 class="mr-1 h-4 w-4" />
+							Delete
+						</button>
+					</div>
+				</div>
+
+				<div class="prose prose-indigo mt-6 max-w-none">
+					<div class="whitespace-pre-line">{note.content}</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Generation Status Messages -->
+		{#if generationError}
+			<div class="my-4 flex items-start rounded-md border border-red-200 bg-red-50 p-4">
+				<AlertCircle class="mt-0.5 mr-3 h-5 w-5 flex-shrink-0 text-red-500" />
+				<p class="text-red-800">{generationError}</p>
+			</div>
+		{/if}
+		{#if generationSuccess}
+			<div class="my-4 flex items-start rounded-md border border-green-200 bg-green-50 p-4">
+				<p class="text-green-800">{generationSuccess}</p>
+				<a
+					href="/flashcards"
+					class="ml-auto text-sm font-medium text-green-700 hover:text-green-900"
+					>View Flashcards &rarr;</a
+				>
+			</div>
+		{/if}
+
+		<div class="mt-8 flex flex-col items-start justify-between gap-4 sm:flex-row">
+			<div class="w-full rounded-lg border border-indigo-100 bg-indigo-50 p-5 sm:w-1/2">
+				<h3 class="mb-3 text-lg font-medium text-indigo-900">Create Flashcards</h3>
+				<p class="mb-4 text-indigo-700">
+					Turn key points from this note into flashcards to improve retention and recall.
+				</p>
+				<button
+					on:click={generateFlashcardsForNote}
+					disabled={generating}
+					class="inline-flex items-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:bg-indigo-300"
+				>
+					{#if generating}
+						<svg
+							class="mr-2 h-4 w-4 animate-spin"
+							xmlns="http://www.w3.org/2000/svg"
+							fill="none"
+							viewBox="0 0 24 24"
+						>
+							<circle
+								class="opacity-25"
+								cx="12"
+								cy="12"
+								r="10"
+								stroke="currentColor"
+								stroke-width="4"
+							></circle>
+							<path
+								class="opacity-75"
+								fill="currentColor"
+								d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+							></path>
+						</svg>
+						Generating...
+					{:else}
+						<BookOpen class="mr-1 h-4 w-4" />
+						Generate Flashcards
+					{/if}
+				</button>
+			</div>
+
+			<div class="w-full rounded-lg border border-gray-200 bg-gray-50 p-5 sm:w-1/2">
+				<h3 class="mb-3 text-lg font-medium text-gray-900">Note Tips</h3>
+				<ul class="space-y-2 text-sm text-gray-700">
+					<li>• Review this note regularly to reinforce learning</li>
+					<li>• Create flashcards for active recall practice</li>
+					<li>• Summarize key points for better retention</li>
+					<li>• Link related concepts from different notes</li>
+				</ul>
+			</div>
+		</div>
+	{/if}
+</div>
