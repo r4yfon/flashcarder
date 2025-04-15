@@ -1,57 +1,72 @@
-import { json } from '@sveltejs/kit';
-import { db } from '$lib/server/db';
-import { notes, flashcards } from '$lib/server/db/schema';
-import { generateFlashcards } from '$lib/server/services/ai-service';
-import { createDemoUserIfNotExists } from '$lib/server/utils/user-utils';
+import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { v4 as uuidv4 } from 'uuid';
+import { generateFlashcardsFromNote } from '$lib/server/openai';
+import { db } from '$lib/server/db';
+import { notes, flashcards as flashcardsTable } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
+import { nanoid } from 'nanoid';
 
 export const POST: RequestHandler = async ({ request }) => {
-	try {
-		await createDemoUserIfNotExists();
+    const { noteId, count = 5 } = await request.json(); // Default to 5 if count not provided
 
-		const { noteId, count = 5 } = await request.json();
+    if (!noteId) {
+        throw error(400, 'Note ID is required');
+    }
 
-		if (!noteId) {
-			return json({ error: 'Note ID is required' }, { status: 400 });
-		}
-		const note = await db.query.notes.findFirst({ where: eq(notes.id, noteId) });
-		if (!note) {
-			return json({ error: 'Note not found' }, { status: 404 });
-		}
-		const content = note.content;
-		if (!content) {
-			return json({ error: 'Failed to get content from note' }, { status: 400 });
-		}
+    if (typeof count !== 'number' || count < 1 || count > 50) {
+        throw error(400, 'Invalid count. Must be a number between 1 and 50.');
+    }
 
-		// Generate flashcards using AI
-		const generatedFlashcards = await generateFlashcards(content, count);
+    try {
+        // 1. Fetch the note content
+        const noteResult = await db.select({ content: notes.content }).from(notes).where(eq(notes.id, noteId));
 
-		// Generate a unique ID for this batch
-		const batchId = uuidv4();
+        if (!noteResult || noteResult.length === 0) {
+            throw error(404, 'Note not found');
+        }
+        const noteContent = noteResult[0].content;
 
-		// Store flashcards in database with the batchId
-		const flashcardValues = generatedFlashcards.map((fc) => ({
-			id: uuidv4(),
-			question: fc.question,
-			answer: fc.answer,
-			noteId: noteId,
-			userId: 1, // Assuming demo user ID
-			batchId: batchId // Assign the batch ID
-		}));
+        if (!noteContent) {
+            throw error(400, 'Note content is empty');
+        }
 
-		if (flashcardValues.length > 0) {
-			await db.insert(flashcards).values(flashcardValues);
-		}
+        // 2. Generate flashcards using AI
+        const generatedFlashcards = await generateFlashcardsFromNote(noteContent, count);
 
-		// Return the batchId along with the cards
-		return json({ batchId: batchId, flashcards: flashcardValues }, { status: 201 });
-	} catch (error) {
-		console.error('Error generating flashcards:', error);
-		if (error instanceof Error && error.message.includes('AI service failed')) {
-			return json({ error: error.message }, { status: 502 });
-		}
-		return json({ error: 'Failed to generate flashcards' }, { status: 500 });
-	}
+        if (!generatedFlashcards || generatedFlashcards.length === 0) {
+            throw error(500, 'AI failed to generate flashcards or returned empty result');
+        }
+
+        // 3. Prepare flashcards for insertion with a unique batch ID
+        const batchId = nanoid(); // Generate a unique ID for this batch
+        const flashcardsToInsert = generatedFlashcards.map((fc) => ({
+            id: nanoid(), // Generate unique ID for each flashcard
+            noteId: noteId,
+            batchId: batchId, // Assign the same batch ID to all cards in this generation
+            question: fc.question,
+            answer: fc.answer,
+            createdAt: new Date().toISOString(), // Add timestamp
+            updatedAt: new Date().toISOString()
+        }));
+
+        // 4. Insert flashcards into the database
+        await db.insert(flashcardsTable).values(flashcardsToInsert);
+
+        // 5. Return the generated flashcards AND the batchId
+        return json(
+            {
+                flashcards: generatedFlashcards, // Keep returning cards for potential future use? Or remove?
+                batchId: batchId // *** ADDED batchId ***
+            },
+            { status: 201 }
+        );
+    } catch (err) {
+        console.error('Error generating flashcards:', err);
+        // Check if it's a SvelteKit error and re-throw
+        if (err && typeof err === 'object' && 'status' in err && 'body' in err) {
+            throw err;
+        }
+        // Otherwise, throw a generic 500 error
+        throw error(500, err instanceof Error ? err.message : 'Failed to generate flashcards');
+    }
 };

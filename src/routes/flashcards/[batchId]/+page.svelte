@@ -1,4 +1,3 @@
-<!-- filepath: c:\Users\GRAM\Documents\GitHub\flashcarder\src\routes\flashcards\[batchId]\+page.svelte -->
 <script lang="ts">
 	import { Trash2, RefreshCw, ArrowLeft } from 'lucide-svelte';
 	import { formatDate } from '$lib/utils/formatters';
@@ -16,13 +15,21 @@
 	let showAnswerMap = new Map<string, boolean>();
 
 	// Initialize map when cards data is available
+	// Use $: to ensure it re-runs if 'cards' changes (e.g., after deletion)
 	$: {
-		showAnswerMap = new Map<string, boolean>();
-		cards.forEach((card) => {
-			if (card.id) {
-				showAnswerMap.set(card.id, false); // Start showing question
-			}
-		});
+		// Check if showAnswerMap needs initialization or update
+		if (cards && cards.length > 0) {
+			const newMap = new Map<string, boolean>();
+			cards.forEach((card) => {
+				if (card.id) {
+					// Preserve existing state if card still exists, otherwise default to false
+					newMap.set(card.id, showAnswerMap.get(card.id) ?? false);
+				}
+			});
+			showAnswerMap = newMap;
+		} else {
+			showAnswerMap = new Map<string, boolean>(); // Clear map if no cards
+		}
 	}
 
 	// --- Individual Card Deletion ---
@@ -39,10 +46,10 @@
 				throw new Error(data.error || 'Failed to delete flashcard');
 			}
 
-			// Remove the card from the local state and the answer map
-			showAnswerMap.delete(cardId);
+			// Remove the card from the local state.
+			// The $: block above will handle updating showAnswerMap reactively.
 			cards = cards.filter((card) => card.id !== cardId);
-			// Optionally update batch card count if displayed, or navigate if empty
+
 			if (cards.length === 0) {
 				alert('Last card deleted. Returning to flashcard list.');
 				window.location.href = '/flashcards'; // Simple redirect
@@ -56,7 +63,8 @@
 
 	// --- Toggle Card Answer ---
 	function toggleAnswer(cardId: string | undefined) {
-		console.log('toggleAnswer called with cardId:', cardId); // Log 1: Function called?
+		// Keep the console logs for debugging if needed
+		console.log('toggleAnswer called with cardId:', cardId);
 
 		if (!cardId) {
 			console.error('toggleAnswer: cardId is undefined');
@@ -64,17 +72,15 @@
 		}
 
 		const currentState = showAnswerMap.get(cardId);
-		console.log('Current state for', cardId, ':', currentState); // Log 2: What's the current state?
+		console.log('Current state for', cardId, ':', currentState);
 
 		const newState = !currentState;
-		showAnswerMap.set(cardId, newState);
-		console.log('Set new state for', cardId, 'to:', newState); // Log 3
+		// Create a new map for reactivity
+		const newMap = new Map(showAnswerMap);
+		newMap.set(cardId, newState);
+		showAnswerMap = newMap; // Trigger reactivity
 
-		// Force reactivity update by creating a NEW map
-		showAnswerMap = new Map(showAnswerMap); // <--- CHANGE THIS LINE
-		console.log('New Map created for reactivity'); // Log 4 updated
-
-		// Optional: Check the map directly after update
+		console.log('Set new state for', cardId, 'to:', newState);
 		console.log('State in new map after update:', showAnswerMap.get(cardId));
 	}
 </script>
@@ -115,91 +121,156 @@
 	<!-- Card List -->
 	<div class="space-y-6">
 		{#each cards as card (card.id)}
-			<div class="relative rounded-lg border border-gray-200 bg-white p-4 shadow-sm sm:p-6">
-				<p class="absolute top-0 left-0 bg-yellow-200 text-xs">
-					Flipped: {showAnswerMap.get(card.id)}
-				</p>
-				<div class="flashcard group perspective {showAnswerMap.get(card.id) ? 'flipped' : ''}">
-					<div class="flashcard-inner relative min-h-[120px]">
-						<!-- {/* Front (Question) */} -->
-						<div
-							class="flashcard-front absolute inset-0 flex flex-col rounded-md border border-indigo-100 bg-indigo-50 p-4"
+			<!-- Perspective container -->
+			<div class="flashcard group perspective relative">
+				<!-- Inner rotating container - Apply flip class based on map state -->
+				<div
+					class="flashcard-inner relative min-h-[240px] cursor-pointer"
+					class:flipped={showAnswerMap.get(card.id)}
+					role="button"
+					tabindex="0"
+					on:click={() => toggleAnswer(card.id)}
+					on:keydown={(e) => e.key === 'Enter' && toggleAnswer(card.id)}
+				>
+					<!-- Front (Question) -->
+					<div
+						class="flashcard-front absolute inset-0 flex flex-col rounded-md border border-indigo-100 bg-indigo-50 p-4"
+					>
+						<button
+							on:click|stopPropagation={() => deleteFlashcard(card.id)}
+							disabled={deletingCardId === card.id}
+							title="Delete this card"
+							class="absolute top-2 right-2 z-10 rounded-md p-1 text-gray-400 hover:text-red-600 focus:ring-2 focus:ring-red-500 focus:ring-offset-1 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
 						>
-							<p class="mb-2 text-sm font-medium text-indigo-700">Question:</p>
-							<p class="flex-grow text-indigo-900">{card.question}</p>
-							<button
-								onclick={() => toggleAnswer(card.id)}
-								title="Flip card"
-								class="absolute right-2 bottom-2 rounded-full p-1 text-indigo-400 hover:bg-indigo-100 hover:text-indigo-600 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 focus:outline-none"
-							>
-								<RefreshCw class="h-4 w-4" />
-							</button>
+							{#if deletingCardId === card.id}
+								<svg
+									class="h-4 w-4 animate-spin"
+									xmlns="http://www.w3.org/2000/svg"
+									fill="none"
+									viewBox="0 0 24 24"
+									><circle
+										class="opacity-25"
+										cx="12"
+										cy="12"
+										r="10"
+										stroke="currentColor"
+										stroke-width="4"
+									></circle><path
+										class="opacity-75"
+										fill="currentColor"
+										d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+									></path></svg
+								>
+							{:else}
+								<Trash2 class="h-4 w-4" />
+							{/if}
+						</button>
+						<p class="mb-2 text-sm font-medium text-indigo-700">Question:</p>
+						<!-- Display actual card question -->
+						<p
+							class="m-auto max-w-[40ch] flex-grow content-evenly text-center text-balance text-indigo-900"
+						>
+							{card.question}
+						</p>
+						<!-- Button is now part of the clickable area, but keep for visual cue -->
+						<div
+							class="absolute right-2 bottom-2 rounded-full p-1 text-indigo-400"
+							aria-hidden="true"
+						>
+							<RefreshCw class="h-4 w-4" />
 						</div>
-						<!-- {/* Back (Answer) */} -->
-						<div
-							class="flashcard-back absolute inset-0 flex flex-col rounded-md border border-green-100 bg-green-50 p-4"
+					</div>
+
+					<!-- Back (Answer) -->
+					<div
+						class="flashcard-back absolute inset-0 flex flex-col rounded-md border border-green-100 bg-green-50 p-4"
+					>
+						<button
+							on:click|stopPropagation={() => deleteFlashcard(card.id)}
+							disabled={deletingCardId === card.id}
+							title="Delete this card"
+							class="absolute top-2 right-2 z-10 rounded-md p-1 text-gray-400 hover:text-red-600 focus:ring-2 focus:ring-red-500 focus:ring-offset-1 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
 						>
-							<p class="mb-2 text-sm font-medium text-green-700">Answer:</p>
-							<p class="flex-grow text-green-900">{card.answer}</p>
-							<button
-								onclick={() => toggleAnswer(card.id)}
-								title="Flip card"
-								class="absolute right-2 bottom-2 rounded-full p-1 text-green-400 hover:bg-green-100 hover:text-green-600 focus:ring-2 focus:ring-green-500 focus:ring-offset-1 focus:outline-none"
-							>
-								<RefreshCw class="h-4 w-4" />
-							</button>
+							{#if deletingCardId === card.id}
+								<svg
+									class="h-4 w-4 animate-spin"
+									xmlns="http://www.w3.org/2000/svg"
+									fill="none"
+									viewBox="0 0 24 24"
+									><circle
+										class="opacity-25"
+										cx="12"
+										cy="12"
+										r="10"
+										stroke="currentColor"
+										stroke-width="4"
+									></circle><path
+										class="opacity-75"
+										fill="currentColor"
+										d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+									></path></svg
+								>
+							{:else}
+								<Trash2 class="h-4 w-4" />
+							{/if}
+						</button>
+						<p class="mb-2 text-sm font-medium text-green-700">Answer:</p>
+						<!-- Display actual card answer -->
+						<p
+							class="m-auto max-w-[40ch] flex-grow content-evenly text-center text-balance text-green-900"
+						>
+							{card.answer}
+						</p>
+						<!-- Button is now part of the clickable area, but keep for visual cue -->
+						<div
+							class="absolute right-2 bottom-2 rounded-full p-1 text-green-400"
+							aria-hidden="true"
+						>
+							<RefreshCw class="h-4 w-4" />
 						</div>
 					</div>
 				</div>
-				<!-- {/* Individual Card Delete Button */} -->
-				<button
-					onclick={() => deleteFlashcard(card.id)}
-					disabled={deletingCardId === card.id}
-					title="Delete this card"
-					class="absolute top-2 right-2 z-10 rounded-md p-1 text-gray-400 hover:text-red-600 focus:ring-2 focus:ring-red-500 focus:ring-offset-1 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-				>
-					{#if deletingCardId === card.id}
-						<svg
-							class="h-4 w-4 animate-spin"
-							xmlns="http://www.w3.org/2000/svg"
-							fill="none"
-							viewBox="0 0 24 24"
-							><circle
-								class="opacity-25"
-								cx="12"
-								cy="12"
-								r="10"
-								stroke="currentColor"
-								stroke-width="4"
-							></circle><path
-								class="opacity-75"
-								fill="currentColor"
-								d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-							></path></svg
-						>
-					{:else}
-						<Trash2 class="h-4 w-4" />
-					{/if}
-				</button>
 			</div>
+
+			<!-- Individual Card Delete Button -->
+			<!-- </div> -->
 		{/each}
 	</div>
 </div>
 
 <style>
-	/* Keep the flip animation styles */
+	/* Ensure perspective is applied */
+	.perspective {
+		perspective: 1000px;
+	}
+
+	/* Inner rotating element */
 	.flashcard-inner {
 		transition: transform 0.6s;
 		transform-style: preserve-3d;
+		/* Ensure it fills the perspective container if needed */
+		width: 100%;
+		height: 100%;
 	}
-	.flashcard.flipped .flashcard-inner {
+
+	/* Apply flip transformation */
+	.flashcard-inner.flipped {
 		transform: rotateY(180deg);
 	}
+
+	/* Style front and back, hide the side facing away */
 	.flashcard-front,
 	.flashcard-back {
+		position: absolute;
+		width: 100%;
+		height: 100%;
+		inset: 0;
 		backface-visibility: hidden;
 		-webkit-backface-visibility: hidden; /* Safari */
+		/* Add padding/flex etc. via classes */
 	}
+
+	/* Ensure the back starts rotated */
 	.flashcard-back {
 		transform: rotateY(180deg);
 	}

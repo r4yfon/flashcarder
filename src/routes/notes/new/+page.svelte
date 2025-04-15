@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Save, Sparkles, AlertCircle, UploadCloud } from 'lucide-svelte';
+	import { goto } from '$app/navigation'; // Import goto
 
 	let noteTitle = '';
 	let noteContent = '';
@@ -7,8 +8,6 @@
 	let error = '';
 	let success = '';
 	let generating = false;
-	let flashcardsGenerated = false;
-	let generatedFlashcards: Array<{ question: string; answer: string }> = [];
 	let isDraggingOver = false;
 
 	async function saveNote() {
@@ -40,7 +39,6 @@
 			}
 
 			success = 'Note saved successfully!';
-			flashcardsGenerated = false; // Reset flashcard view if note is saved again
 			return data.note; // Return the saved note object
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'An error occurred';
@@ -54,23 +52,19 @@
 		const note = await saveNote(); // Save note first
 		if (!note) return;
 
-		// Prompt for the number of flashcards
 		const countInput = prompt('How many flashcards would you like to generate? (5-30)', '5');
-		if (countInput === null) return; // User cancelled
+		if (countInput === null) return;
 
 		const count = parseInt(countInput, 10);
 		if (isNaN(count) || count < 1 || count > 50) {
 			error = 'Please enter a valid number between 1 and 50.';
 			success = '';
-			flashcardsGenerated = false;
 			return;
 		}
 
 		generating = true;
-		flashcardsGenerated = false;
-		generatedFlashcards = [];
 		error = '';
-		success = ''; // Clear previous success message
+		success = '';
 
 		try {
 			const response = await fetch('/api/flashcards', {
@@ -78,7 +72,7 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					noteId: note.id,
-					count: count // Use the prompted count
+					count: count
 				})
 			});
 
@@ -88,9 +82,12 @@
 				throw new Error(data.error || 'Failed to generate flashcards');
 			}
 
-			generatedFlashcards = data.flashcards || [];
-			flashcardsGenerated = true;
-			success = `Generated ${generatedFlashcards.length} flashcards!`;
+			if (data.batchId) {
+				// Redirect to the newly created batch page
+				await goto(`/flashcards/${data.batchId}`);
+			} else {
+				error = 'Flashcards generated, but could not retrieve batch ID.';
+			}
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'An error occurred during generation';
 		} finally {
@@ -175,13 +172,13 @@
 		</div>
 	{/if}
 
-	{#if success && !flashcardsGenerated}
+	{#if success}
 		<div class="mb-6 rounded-md border border-green-200 bg-green-50 p-4">
 			<p class="text-green-800">{success}</p>
 		</div>
 	{/if}
 
-	<!-- Added Drop Zone wrapper -->
+	<!-- Drop Zone wrapper -->
 	<div
 		role="region"
 		aria-label="Note Drop Zone"
@@ -236,8 +233,6 @@
 			</p>
 		</div>
 
-		<!-- Flashcard Count Slider - REMOVED -->
-
 		<!-- Buttons -->
 		<div class="flex gap-4">
 			<button
@@ -257,7 +252,7 @@
 						<path
 							class="opacity-75"
 							fill="currentColor"
-							d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+							d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
 						></path>
 					</svg>
 					Saving...
@@ -284,7 +279,7 @@
 						<path
 							class="opacity-75"
 							fill="currentColor"
-							d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+							d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
 						></path>
 					</svg>
 					Generating...
@@ -295,35 +290,6 @@
 			</button>
 		</div>
 	</div>
-
-	<!-- Flashcard Preview -->
-	{#if flashcardsGenerated && generatedFlashcards.length > 0}
-		<div class="mb-8">
-			<h2 class="mb-4 text-2xl font-bold text-gray-900">Generated Flashcards</h2>
-			<div class="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-				{#each generatedFlashcards as flashcard, index}
-					<div class="p-6 {index !== 0 ? 'border-t border-gray-200' : ''}">
-						<div class="mb-4">
-							<h3 class="mb-2 text-lg font-medium text-gray-900">Question:</h3>
-							<p class="text-gray-700">{flashcard.question}</p>
-						</div>
-						<div>
-							<h3 class="mb-2 text-lg font-medium text-gray-900">Answer:</h3>
-							<p class="text-gray-700">{flashcard.answer}</p>
-						</div>
-					</div>
-				{/each}
-			</div>
-			<div class="mt-4 flex justify-center">
-				<a
-					href="/flashcards"
-					class="inline-flex items-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:outline-none"
-				>
-					View All Flashcards
-				</a>
-			</div>
-		</div>
-	{/if}
 
 	<!-- Tips Section -->
 	<div class="rounded-lg border border-gray-200 bg-gray-50 p-6">
