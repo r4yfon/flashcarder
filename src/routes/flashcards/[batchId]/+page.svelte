@@ -74,12 +74,23 @@
 			return;
 		}
 
-		const currentState = showAnswerMap.get(cardId);
-		const newState = !currentState;
-		// Create a new map for reactivity
-		const newMap = new Map(showAnswerMap);
-		newMap.set(cardId, newState);
-		showAnswerMap = newMap; // Trigger reactivity
+		const isCurrentlyFlipped = showAnswerMap.get(cardId);
+		const newMap = new Map<string, boolean>();
+
+		// Iterate through all cards to set their state
+		cards.forEach((card) => {
+			if (card.id) {
+				if (card.id === cardId) {
+					// If this is the clicked card, toggle its state
+					newMap.set(card.id, !isCurrentlyFlipped);
+				} else {
+					// If it's any other card, ensure it's flipped back to the question (false)
+					newMap.set(card.id, false);
+				}
+			}
+		});
+
+		showAnswerMap = newMap; // Trigger reactivity with the updated map
 	}
 
 	// --- Start Editing Title ---
