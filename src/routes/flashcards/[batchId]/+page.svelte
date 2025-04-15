@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Trash2, RefreshCw, ArrowLeft } from 'lucide-svelte';
+	import { Trash2, RefreshCw, ArrowLeft, Edit, Save, X } from 'lucide-svelte';
 	import { formatDate } from '$lib/utils/formatters';
 	import type { PageData } from './$types';
 
@@ -7,12 +7,18 @@
 
 	let batch = data.batch;
 	let cards = data.cards;
-	let error = ''; // For deletion errors on this page
+	let error = ''; // For deletion/edit errors on this page
 
 	let deletingCardId: string | null = null;
 
 	// State for card flipping: Map<cardId, showAnswer>
 	let showAnswerMap = new Map<string, boolean>();
+
+	// State for title editing
+	let isEditingTitle = false;
+	let editedTitle = batch.noteTitle || ''; // Initialize with current title
+	let isSavingTitle = false;
+	let titleError = ''; // Specific error for title saving
 
 	// Initialize map when cards data is available
 	// Use $: to ensure it re-runs if 'cards' changes (e.g., after deletion)
@@ -63,25 +69,70 @@
 
 	// --- Toggle Card Answer ---
 	function toggleAnswer(cardId: string | undefined) {
-		// Keep the console logs for debugging if needed
-		console.log('toggleAnswer called with cardId:', cardId);
-
 		if (!cardId) {
 			console.error('toggleAnswer: cardId is undefined');
 			return;
 		}
 
 		const currentState = showAnswerMap.get(cardId);
-		console.log('Current state for', cardId, ':', currentState);
-
 		const newState = !currentState;
 		// Create a new map for reactivity
 		const newMap = new Map(showAnswerMap);
 		newMap.set(cardId, newState);
 		showAnswerMap = newMap; // Trigger reactivity
+	}
 
-		console.log('Set new state for', cardId, 'to:', newState);
-		console.log('State in new map after update:', showAnswerMap.get(cardId));
+	// --- Start Editing Title ---
+	function startEditingTitle() {
+		if (!batch.noteId) return; // Should not happen if edit button is shown
+		editedTitle = batch.noteTitle || '';
+		isEditingTitle = true;
+		titleError = ''; // Clear previous title errors
+	}
+
+	// --- Cancel Editing Title ---
+	function cancelEditingTitle() {
+		isEditingTitle = false;
+		titleError = '';
+	}
+
+	// --- Save Edited Title ---
+	async function saveEditedTitle() {
+		if (!batch.noteId || !isEditingTitle) return;
+
+		const originalTitle = batch.noteTitle;
+		const newTitle = editedTitle.trim();
+
+		if (newTitle === originalTitle) {
+			cancelEditingTitle(); // No change
+			return;
+		}
+
+		isSavingTitle = true;
+		titleError = '';
+		error = ''; // Clear general errors too
+
+		try {
+			// Use the existing note update endpoint
+			const response = await fetch(`/api/notes/${batch.noteId}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ title: newTitle || 'Untitled Note' })
+			});
+
+			if (!response.ok) {
+				const data = await response.json();
+				throw new Error(data.error || 'Failed to update note title');
+			}
+
+			// Update local state on success
+			batch = { ...batch, noteTitle: newTitle || 'Untitled Note' };
+			cancelEditingTitle(); // Exit edit mode
+		} catch (err) {
+			titleError = err instanceof Error ? err.message : 'An error occurred while saving title';
+		} finally {
+			isSavingTitle = false;
+		}
 	}
 </script>
 
@@ -96,19 +147,87 @@
 				<ArrowLeft class="mr-1 h-4 w-4" />
 				Back to Batches
 			</a>
-			<h1 class="text-2xl font-bold text-gray-900">
-				Flashcards from: {batch.noteTitle || 'Unknown Note'}
-				{#if batch.noteId}
-					<a
-						href="/notes/{batch.noteId}"
-						title="View Note"
-						class="ml-2 text-indigo-600 hover:text-indigo-800">🔗</a
+
+			<!-- Title Display/Edit Section -->
+			<div class="mt-1 flex min-h-[40px] items-center gap-2">
+				{#if isEditingTitle}
+					<!-- Edit Mode -->
+					<input
+						type="text"
+						bind:value={editedTitle}
+						class="block w-full flex-grow rounded-md border-gray-300 text-2xl font-bold shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+						placeholder="Enter title"
+						disabled={isSavingTitle}
+						on:keydown={(e) => e.key === 'Enter' && saveEditedTitle()}
+						on:keydown={(e) => e.key === 'Escape' && cancelEditingTitle()}
+					/>
+					<button
+						on:click={saveEditedTitle}
+						disabled={isSavingTitle}
+						title="Save title"
+						class="inline-flex items-center rounded-md border border-transparent bg-indigo-600 p-2 text-white shadow-sm hover:bg-indigo-700 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:bg-indigo-300"
 					>
+						{#if isSavingTitle}
+							<svg
+								class="h-5 w-5 animate-spin"
+								xmlns="http://www.w3.org/2000/svg"
+								fill="none"
+								viewBox="0 0 24 24"
+							>
+								<circle
+									class="opacity-25"
+									cx="12"
+									cy="12"
+									r="10"
+									stroke="currentColor"
+									stroke-width="4"
+								></circle>
+								<path
+									class="opacity-75"
+									fill="currentColor"
+									d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+								></path>
+							</svg>
+						{:else}
+							<Save class="h-5 w-5" />
+						{/if}
+					</button>
+					<button
+						on:click={cancelEditingTitle}
+						title="Cancel edit"
+						class="inline-flex items-center rounded-md border border-gray-300 bg-white p-2 text-gray-700 shadow-sm hover:bg-gray-50 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:outline-none"
+					>
+						<X class="h-5 w-5" />
+					</button>
+				{:else}
+					<!-- Display Mode -->
+					<h1 class="flex-grow text-2xl font-bold text-gray-900">
+						Flashcards from: {batch.noteTitle || 'Untitled Note'}
+						{#if batch.noteId}
+							<a
+								href="/notes/{batch.noteId}"
+								title="View Note"
+								class="ml-2 text-indigo-600 hover:text-indigo-800">🔗</a
+							>
+						{/if}
+					</h1>
+					{#if batch.noteId}
+						<button
+							on:click={startEditingTitle}
+							title="Edit title"
+							class="ml-auto flex-shrink-0 rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+						>
+							<Edit class="h-5 w-5" />
+						</button>
+					{/if}
 				{/if}
-			</h1>
-			<p class="text-sm text-gray-500">Generated {formatDate(batch.createdAt)}</p>
+			</div>
+			{#if titleError}
+				<p class="mt-1 text-sm text-red-600">{titleError}</p>
+			{/if}
+
+			<p class="mt-1 text-sm text-gray-500">Generated {formatDate(batch.createdAt)}</p>
 		</div>
-		<!-- Maybe add batch-level actions here later -->
 	</div>
 
 	<!-- Deletion Error Display -->
@@ -231,9 +350,6 @@
 					</div>
 				</div>
 			</div>
-
-			<!-- Individual Card Delete Button -->
-			<!-- </div> -->
 		{/each}
 	</div>
 </div>
