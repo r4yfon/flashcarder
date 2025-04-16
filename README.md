@@ -10,6 +10,8 @@ FlashCarder is a web application that allows users to create study notes and aut
 - **View & Manage Notes:** See a list of all your notes, view individual notes, and delete them.
 - **View & Manage Flashcards:** Flashcards are grouped by generation batch. View batches, flip cards between question and answer, and delete individual cards or entire batches.
 - **Note Linking:** Flashcard batches link back to the original note they were generated from.
+- **Demo User:** The app creates a demo user automatically for development and testing.
+- **No Authentication:** User accounts and authentication are not implemented; all data is associated with the demo user.
 
 ## Tech Stack
 
@@ -36,8 +38,7 @@ FlashCarder is a web application that allows users to create study notes and aut
     # or pnpm install or yarn install
     ```
 3.  **Set up environment variables:**
-    - Copy the example environment file: `cp .env.example .env`
-    - Edit the `.env` file and add your `OPENROUTER_API_KEY`. You might also want to set `APP_URL` if deploying or running on a specific domain/port.
+    - Create a `.env` file in the project root and add the following variables:
     ```env
     # .env
     OPENROUTER_API_KEY="your_openrouter_api_key_here"

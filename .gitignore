@@ -12,12 +12,12 @@ node_modules
 # OS
 .DS_Store
 Thumbs.db
+dev.db
 
 # Env
 .env
 .env.*
 !.env.example
-.env.example
 !.env.test
 
 # Vite
