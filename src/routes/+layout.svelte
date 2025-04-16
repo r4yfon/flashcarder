@@ -7,7 +7,7 @@
 	let { children } = $props();
 	let mobileMenuOpen = $state(false);
 
-	// Function to check if a route is active
+	// Function to check if a route is active for styling of navbar
 	const isActive = $derived((path: string) => {
 		// Handle exact match for home page
 		if (path === '/' && page.url.pathname === '/') {
@@ -22,7 +22,6 @@
 
 	function toggleMobileMenu() {
 		mobileMenuOpen = !mobileMenuOpen;
-		console.log('Mobile menu toggled:', mobileMenuOpen); // Debug log
 	}
 
 	// Close mobile menu when window resizes to desktop size
@@ -45,13 +44,11 @@
 	<nav class="bg-white shadow-sm">
 		<div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
 			<div class="flex h-16 justify-between">
-				<div class="flex">
-					<a class="flex flex-shrink-0 items-center" href="/">
-						<BookOpen class="h-8 w-8 text-indigo-600" />
-						<span class="ml-2 text-xl font-bold text-gray-900">FlashCarder</span>
-					</a>
-				</div>
-				<div class="hidden sm:ml-6 sm:flex sm:space-x-8">
+				<a class="flex flex-shrink-0 items-center" href="/">
+					<BookOpen class="h-8 w-8 text-indigo-600" />
+					<span class="ml-2 text-xl font-bold text-gray-900">FlashCarder</span>
+				</a>
+				<div class="hidden sm:flex sm:space-x-8">
 					<a
 						href="/"
 						class="inline-flex items-center border-b-2 {isActive('/')
@@ -80,22 +77,21 @@
 						Flashcards
 					</a>
 				</div>
+
 				<!-- Mobile menu button -->
-				<div class="-mr-2 ml-2 flex items-center sm:hidden">
-					<button
-						type="button"
-						class="inline-flex items-center justify-center rounded-md p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-500 focus:ring-2 focus:ring-indigo-500 focus:outline-none focus:ring-inset"
-						onclick={toggleMobileMenu}
-						aria-expanded={mobileMenuOpen}
-					>
-						<span class="sr-only">Open main menu</span>
-						{#if mobileMenuOpen}
-							<X class="block h-6 w-6" aria-hidden="true" />
-						{:else}
-							<Menu class="block h-6 w-6" aria-hidden="true" />
-						{/if}
-					</button>
-				</div>
+				<button
+					type="button"
+					class="inline-flex h-fit items-center justify-center self-center rounded-md p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-500 focus:ring-2 focus:ring-indigo-500 focus:outline-none focus:ring-inset sm:hidden"
+					onclick={toggleMobileMenu}
+					aria-expanded={mobileMenuOpen}
+				>
+					<span class="sr-only">Open main menu</span>
+					{#if mobileMenuOpen}
+						<X class="block h-6 w-6" aria-hidden="true" />
+					{:else}
+						<Menu class="block h-6 w-6" aria-hidden="true" />
+					{/if}
+				</button>
 			</div>
 		</div>
 
