@@ -1,50 +1,160 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { FileText, Trash2, Sparkles, Edit, AlertCircle, PlusCircle, RefreshCw } from 'lucide-svelte';
+	import { onMount, onDestroy } from 'svelte';
+	import { fade } from 'svelte/transition';
+	import {
+		FileText,
+		Trash2,
+		Sparkles,
+		Edit,
+		AlertCircle,
+		PlusCircle,
+		RefreshCw,
+		X,
+		AlertTriangle // Import AlertTriangle for confirmation state
+	} from 'lucide-svelte';
 	import type { Note } from '$lib/types';
-	import { formatDate, truncateContent } from '$lib/utils/formatters';
+	import { formatDate } from '$lib/utils/formatters';
 	import { goto } from '$app/navigation';
 
 	type NoteWithBatch = Note & { batchId?: string | null };
 
-	export let data: { notes: NoteWithBatch[]; error?: string };
+	const { data } = $props<{ notes: NoteWithBatch[]; error?: string }>();
 
-	let notes: NoteWithBatch[] = [];
-	let loading = true;
-	let error = data.error || '';
+	let notes: NoteWithBatch[] = $state([]);
+	let loading = $state(true);
+	let error = $state(data.error || '');
 
-	let actionState: { [key: string]: 'generating' | 'deleting' | 'regenerating' | null } = {};
-	let generationSuccess = '';
-	let generationError = '';
+	let actionState: { [key: string]: 'generating' | 'deleting' | 'regenerating' | null } = $state(
+		{}
+	);
+	let generationSuccess = $state('');
+	let generationError = $state('');
+	let pendingDeleteId: string | null = $state(null); // State for two-step delete
 
-	onMount(() => {
-		notes = data.notes || [];
-		loading = false;
-	});
+	// --- Error Banner Logic ---
+	let errorVisible = $state(false);
+	const errorDuration = 8000;
+	let remainingTime = $state(errorDuration);
+	let startTime: number | null = null;
+	let errorTimerId: ReturnType<typeof requestAnimationFrame> | null = null;
+	let progressPercent = $derived((remainingTime / errorDuration) * 100);
 
-	async function deleteNote(id: string | undefined) {
-		if (!id || !confirm('Are you sure you want to delete this note?')) {
-			return;
+	function dismissError() {
+		if (errorTimerId) {
+			cancelAnimationFrame(errorTimerId);
+			errorTimerId = null;
 		}
-		actionState[id] = 'deleting';
+		errorVisible = false;
+		startTime = null;
+		remainingTime = errorDuration; // Reset for next time
+	}
+
+	function timerLoop(timestamp: number) {
+		if (!startTime) {
+			startTime = timestamp;
+		}
+		const elapsed = timestamp - startTime;
+		remainingTime = Math.max(0, errorDuration - elapsed);
+
+		if (remainingTime <= 0) {
+			dismissError();
+		} else {
+			errorTimerId = requestAnimationFrame(timerLoop);
+		}
+	}
+
+	function startErrorTimer() {
+		dismissError();
+
+		if (error) {
+			errorVisible = true;
+			remainingTime = errorDuration;
+			startTime = null;
+			errorTimerId = requestAnimationFrame(timerLoop);
+		} else {
+			errorVisible = false;
+		}
+	}
+
+	$effect(() => {
+		if (error && typeof window !== 'undefined') {
+			startErrorTimer();
+		} else if (!error && errorVisible) {
+			dismissError();
+		}
+	});
+	// --- End Error Banner Logic ---
+
+	// Function to handle the delete button click (first or second step)
+	function handleDeleteClick(id: string | undefined) {
+		if (!id) return;
+
+		if (pendingDeleteId === id) {
+			// Second click: Perform deletion
+			executeDelete(id);
+		} else {
+			// First click: Set pending state
+			pendingDeleteId = id;
+		}
+	}
+
+	// Function to execute the actual deletion API call
+	async function executeDelete(id: string) {
+		actionState = { ...actionState, [id]: 'deleting' };
 		generationError = '';
 		generationSuccess = '';
 		error = '';
+
 		try {
 			const response = await fetch(`/api/notes/${id}`, {
 				method: 'DELETE'
 			});
+
 			if (!response.ok) {
-				const data = await response.json();
-				throw new Error(data.error || 'Failed to delete note');
+				let errorMessage = 'Failed to delete note due to an unknown error.';
+				try {
+					const errorData = await response.json();
+					errorMessage = errorData.message || errorData.error || errorMessage;
+				} catch (parseError) {
+					errorMessage = `Failed to delete note: ${response.statusText} (Status: ${response.status})`;
+					console.error('Failed to parse error response:', parseError);
+				}
+				throw new Error(errorMessage);
 			}
+
 			notes = notes.filter((note) => note.id !== id);
+			generationSuccess = 'Note deleted successfully.';
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'An error occurred during deletion';
+			error = err instanceof Error ? err.message : 'An unexpected error occurred during deletion';
 		} finally {
-			actionState[id] = null;
+			actionState = { ...actionState, [id]: null };
+			pendingDeleteId = null; // Reset pending state after attempt
 		}
 	}
+
+	// Reset pending delete if user clicks outside
+	function handleWindowClick(event: MouseEvent) {
+		const target = event.target as Element;
+		if (!target.closest('[data-delete-confirm-button]')) {
+			pendingDeleteId = null;
+		}
+	}
+
+	onMount(() => {
+		notes = data.notes || [];
+		loading = false;
+		if (error) {
+			startErrorTimer();
+		}
+		window.addEventListener('click', handleWindowClick);
+	});
+
+	onDestroy(() => {
+		if (errorTimerId) {
+			cancelAnimationFrame(errorTimerId);
+		}
+		window.removeEventListener('click', handleWindowClick);
+	});
 
 	async function generateFlashcardsForNote(noteId: string | undefined) {
 		if (!noteId) return;
@@ -88,10 +198,17 @@
 		}
 	}
 
-	async function regenerateFlashcards(noteId: string | undefined, batchId: string | undefined | null) {
+	async function regenerateFlashcards(
+		noteId: string | undefined,
+		batchId: string | undefined | null
+	) {
 		if (!noteId || !batchId) return;
 
-		if (!confirm('This will delete the existing flashcards for this note. Are you sure you want to regenerate?')) {
+		if (
+			!confirm(
+				'This will delete the existing flashcards for this note. Are you sure you want to regenerate?'
+			)
+		) {
 			return;
 		}
 
@@ -138,7 +255,8 @@
 				generationError = 'Flashcards regenerated, but could not retrieve new batch ID.';
 			}
 		} catch (err) {
-			generationError = err instanceof Error ? err.message : 'An error occurred during regeneration';
+			generationError =
+				err instanceof Error ? err.message : 'An error occurred during regeneration';
 		} finally {
 			actionState[noteId] = null;
 		}
@@ -168,10 +286,28 @@
 			<p class="text-green-800">{generationSuccess}</p>
 		</div>
 	{/if}
-	{#if error && !generationError}
-		<div class="mb-6 flex items-start rounded-md border border-red-200 bg-red-50 p-4">
-			<AlertCircle class="mt-0.5 mr-3 h-5 w-5 flex-shrink-0 text-red-500" />
-			<p class="text-red-800">{error}</p>
+
+	<!-- Updated Error Banner with Progress Line, Dismiss Button, and Fade Transition -->
+	{#if errorVisible && !generationError}
+		<div
+			class="relative mb-6 overflow-hidden rounded-md border border-red-200 bg-red-50"
+			role="alert"
+			transition:fade={{ duration: 300 }}
+		>
+			<div class="flex items-center space-x-3 p-4">
+				<AlertCircle class="h-5 w-5 flex-shrink-0 text-red-500" />
+				<p class="flex-1 text-sm text-red-800">{error}</p>
+				<button
+					type="button"
+					onclick={dismissError}
+					class="-m-1.5 flex-shrink-0 rounded-md p-1.5 text-red-500 hover:bg-red-100 focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-red-50 focus:outline-none"
+					aria-label="Dismiss"
+				>
+					<X class="h-5 w-5" />
+				</button>
+			</div>
+			<!-- Progress Bar -->
+			<div class="absolute bottom-0 left-0 h-1 bg-red-400" style="width: {progressPercent}%;"></div>
 		</div>
 	{/if}
 
@@ -209,8 +345,9 @@
 		<div class="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
 			<ul role="list" class="divide-y divide-gray-200">
 				{#each notes as note (note.id)}
-					<li class="block hover:bg-gray-50">
+					<li class="group block hover:bg-gray-50">
 						<div class="flex flex-col p-4 sm:flex-row sm:items-start sm:justify-between sm:p-6">
+							<!-- Make the main content area clickable -->
 							<a href={`/notes/${note.id}`} class="mb-4 block flex-1 sm:mr-6 sm:mb-0">
 								<div class="mb-2">
 									<h3 class="text-lg font-medium text-gray-900 group-hover:text-indigo-600">
@@ -219,68 +356,101 @@
 									<p class="mt-1 text-sm text-gray-500">
 										Created {formatDate(note.createdAt || '')}
 									</p>
+									{#if note.updatedAt && note.updatedAt !== note.createdAt}
+										<p class="mt-1 text-xs text-gray-400">
+											Updated {formatDate(note.updatedAt)}
+										</p>
+									{/if}
 								</div>
-								<div class="prose prose-sm max-w-none">
-									<p class="whitespace-pre-line text-gray-700">{truncateContent(note.content)}</p>
-								</div>
-								</a>
-							<div class="flex flex-row space-x-2 sm:flex-col sm:space-y-2 sm:space-x-0">
-								<a
-									href={`/notes/${note.id}`}
-									class="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:outline-none"
-								>
-										<Edit class="mr-1 h-3.5 w-3.5" />
-										Edit Note
-								</a>
+								<!-- Optional: Add a preview of note content here if desired -->
+							</a>
 
+							<!-- Updated Button Layout -->
+							<div class="flex w-full flex-row gap-3 sm:w-auto sm:max-w-xs">
 								{#if note.batchId}
+									<!-- View Cards Button -->
 									<a
 										href={`/flashcards/${note.batchId}`}
-										class="inline-flex items-center rounded-md border border-transparent bg-green-100 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-200 focus:ring-2 focus:ring-green-500 focus:ring-offset-2 focus:outline-none"
+										onclick={(e) => e.stopPropagation()}
+										class="flex w-24 flex-col items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-3 text-xs font-medium text-gray-700 shadow-md transition duration-150 ease-in-out hover:border-gray-400 hover:bg-gray-50 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:outline-none active:translate-y-px active:shadow-sm"
 									>
-											<svg class="mr-1 h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
-											View Cards
+										<svg
+											class="mb-1 h-6 w-6"
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
+											xmlns="http://www.w3.org/2000/svg"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+											></path>
+										</svg>
+										View
 									</a>
+									<!-- Regenerate Button -->
 									<button
-										on:click|stopPropagation={(e) => { e.stopPropagation(); regenerateFlashcards(note.id, note.batchId); }}
+										onclick={(e) => {
+											e.stopPropagation();
+											regenerateFlashcards(note.id, note.batchId);
+										}}
 										disabled={actionState[note.id!] === 'regenerating'}
-										class="inline-flex items-center rounded-md border border-transparent bg-yellow-100 px-3 py-1.5 text-xs font-medium text-yellow-800 hover:bg-yellow-200 focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:bg-yellow-50 disabled:text-yellow-400"
+										class="flex w-24 flex-col items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-3 text-xs font-medium text-gray-700 shadow-md transition duration-150 ease-in-out hover:border-gray-400 hover:bg-gray-50 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:outline-none active:translate-y-px active:shadow-sm disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400 disabled:shadow-none"
 									>
 										{#if actionState[note.id!] === 'regenerating'}
-											<svg class="mr-1 h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-											Regenerating...
+											<svg class="mb-1 h-6 w-6 animate-spin" viewBox="0 0 24 24">...</svg>
+											Regenerate
 										{:else}
-											<RefreshCw class="mr-1 h-3.5 w-3.5" />
+											<RefreshCw class="mb-1 h-6 w-6" />
 											Regenerate
 										{/if}
 									</button>
 								{:else}
+									<!-- Generate Cards Button -->
 									<button
-										on:click|stopPropagation={(e) => { e.stopPropagation(); generateFlashcardsForNote(note.id); }}
+										onclick={(e) => {
+											e.stopPropagation();
+											generateFlashcardsForNote(note.id);
+										}}
 										disabled={actionState[note.id!] === 'generating'}
-										class="inline-flex items-center rounded-md border border-transparent bg-indigo-100 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-200 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:bg-indigo-50 disabled:text-indigo-400"
+										class="flex w-24 flex-col items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-3 text-xs font-medium text-gray-700 shadow-md transition duration-150 ease-in-out hover:border-gray-400 hover:bg-gray-50 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:outline-none active:translate-y-px active:shadow-sm disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400 disabled:shadow-none"
 									>
 										{#if actionState[note.id!] === 'generating'}
-											<svg class="mr-1 h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-											Generating...
+											<svg class="mb-1 h-6 w-6 animate-spin" viewBox="0 0 24 24">...</svg>
+											Generate
 										{:else}
-											<Sparkles class="mr-1 h-3.5 w-3.5" />
-											Generate Cards
+											<Sparkles class="mb-1 h-6 w-6" />
+											Generate
 										{/if}
 									</button>
 								{/if}
 
+								<!-- Delete / Confirm Delete Button -->
 								<button
-									on:click|stopPropagation={(e) => { e.stopPropagation(); deleteNote(note.id); }}
+									data-delete-confirm-button="true"
+									onclick={(e) => {
+										e.stopPropagation();
+										handleDeleteClick(note.id);
+									}}
 									disabled={actionState[note.id!] === 'deleting'}
-									class="inline-flex items-center rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 shadow-sm hover:bg-red-50 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+									class={`flex w-24 flex-col items-center justify-center rounded-md p-2 text-xs font-medium shadow-md transition duration-150 ease-in-out focus:ring-2 focus:ring-offset-2 focus:outline-none active:translate-y-px active:shadow-sm
+											${
+												pendingDeleteId === note.id
+													? 'border border-red-500 bg-white text-red-800 hover:border-red-600 hover:bg-red-50 focus:ring-red-600 disabled:border-gray-200 disabled:text-red-400'
+													: 'border border-gray-300 bg-white text-red-700 hover:border-gray-400 hover:bg-red-50 focus:ring-red-500 disabled:border-gray-200 disabled:text-red-400'
+											}`}
 								>
 									{#if actionState[note.id!] === 'deleting'}
-										<svg class="mr-1 h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-										Deleting...
+										<svg class="mb-1 h-6 w-6 animate-spin" viewBox="0 0 24 24">...</svg>
+										Delete
+									{:else if pendingDeleteId === note.id}
+										<AlertTriangle class="mb-1 h-6 w-6" />
+										Confirm?
 									{:else}
-										<Trash2 class="mr-1 h-3.5 w-3.5" />
-										Delete Note
+										<Trash2 class="mb-1 h-6 w-6" />
+										Delete
 									{/if}
 								</button>
 							</div>
@@ -290,24 +460,4 @@
 			</ul>
 		</div>
 	{/if}
-
-	<div class="mt-12 rounded-lg border border-gray-200 bg-gray-50 p-6">
-		<h3 class="mb-3 text-lg font-medium text-gray-900">Note Management Tips</h3>
-		<ul class="list-inside list-disc space-y-2 text-gray-600">
-			<li>
-				<strong>Regular review</strong> - Schedule time to review and update your notes periodically
-			</li>
-			<li>
-				<strong>Generate flashcards</strong> - Create flashcards from your most important notes for better
-				retention
-			</li>
-			<li>
-				<strong>Associate with documents</strong> - Connect notes to related documents for better organization
-			</li>
-			<li>
-				<strong>Be consistent</strong> - Use a consistent format for all your notes to make them easier
-				to review
-			</li>
-		</ul>
-	</div>
 </div>
