@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { Save, Sparkles, AlertCircle, UploadCloud } from 'lucide-svelte';
-	import { goto } from '$app/navigation'; // Import goto
+	import { Save, Sparkles, AlertCircle, UploadCloud, FileUp } from 'lucide-svelte'; // Add FileUp
+	import { goto } from '$app/navigation';
+	import { marked } from 'marked';
 
 	let noteTitle = '';
 	let noteContent = '';
@@ -9,6 +10,38 @@
 	let success = '';
 	let generating = false;
 	let isDraggingOver = false;
+	let fileInput: HTMLInputElement; // Reference to the hidden file input
+
+	// --- Refactored File Processing Logic ---
+	function processFile(file: File) {
+		error = ''; // Clear previous errors
+
+		// Basic check for Markdown type
+		if (file.type !== 'text/markdown' && !file.name.toLowerCase().endsWith('.md')) {
+			error = 'Invalid file type. Please select a Markdown (.md) file.';
+			return;
+		}
+
+		const reader = new FileReader();
+
+		reader.onload = (e) => {
+			noteContent = e.target?.result as string;
+			// Set the note title to the filename (without the .md extension)
+			let baseName = file.name;
+			if (baseName.toLowerCase().endsWith('.md')) {
+				baseName = baseName.substring(0, baseName.length - 3);
+			}
+			noteTitle = baseName;
+			success = `Loaded content from ${file.name}`;
+		};
+
+		reader.onerror = () => {
+			error = 'Failed to read the file.';
+		};
+
+		reader.readAsText(file);
+	}
+	// --- End Refactored File Processing Logic ---
 
 	async function saveNote() {
 		if (!noteContent.trim()) {
@@ -119,47 +152,30 @@
 	function handleDrop(event: DragEvent) {
 		event.preventDefault();
 		isDraggingOver = false;
-		error = ''; // Clear previous errors
-
 		const files = event.dataTransfer?.files;
 		if (!files || files.length === 0) {
 			error = 'No file dropped.';
 			return;
 		}
-
 		if (files.length > 1) {
 			error = 'Please drop only one file.';
 			return;
 		}
-
-		const file = files[0];
-
-		// Basic check for Markdown type (might need refinement)
-		if (file.type !== 'text/markdown' && !file.name.toLowerCase().endsWith('.md')) {
-			error = 'Invalid file type. Please drop a Markdown (.md) file.';
-			return;
-		}
-
-		const reader = new FileReader();
-
-		reader.onload = (e) => {
-			noteContent = e.target?.result as string;
-			// Set the note title to the filename (without the .md extension)
-			let baseName = file.name;
-			if (baseName.toLowerCase().endsWith('.md')) {
-				baseName = baseName.substring(0, baseName.length - 3);
-			}
-			noteTitle = baseName;
-			success = `Loaded content from ${file.name}`;
-		};
-
-		reader.onerror = () => {
-			error = 'Failed to read the file.';
-		};
-
-		reader.readAsText(file);
+		processFile(files[0]); // Use the refactored function
 	}
 	// --- End Drag and Drop Handlers ---
+
+	// --- File Input Handler ---
+	function handleFileSelect(event: Event) {
+		const input = event.target as HTMLInputElement;
+		const files = input.files;
+		if (files && files.length > 0) {
+			processFile(files[0]); // Use the refactored function
+		}
+		// Reset the input value so the same file can be selected again if needed
+		input.value = '';
+	}
+	// --- End File Input Handler ---
 </script>
 
 <div class="mx-auto max-w-4xl">
@@ -228,13 +244,51 @@
 					placeholder="Enter your notes here or drop a Markdown file..."
 				></textarea>
 			</div>
-			<p class="mt-1 text-sm text-gray-500">
-				Write or paste your notes, or drag & drop a Markdown (.md) file onto this area.
-			</p>
+			<!-- File Input Trigger -->
+			<div class="mt-2 flex items-center justify-between">
+				<p class="text-sm text-gray-500">
+					Write or paste notes, or drag & drop a Markdown file onto this area.
+				</p>
+				<!-- Hidden File Input -->
+				<input
+					type="file"
+					bind:this={fileInput}
+					on:change={handleFileSelect}
+					accept=".md,text/markdown"
+					class="hidden"
+					aria-hidden="true"
+				/>
+				<!-- Visible Browse Button -->
+				<button
+					type="button"
+					on:click={() => fileInput?.click()}
+					class="inline-flex items-center rounded border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:outline-none"
+				>
+					<FileUp class="mr-1.5 h-3.5 w-3.5" />
+					Browse File...
+				</button>
+			</div>
 		</div>
 
+		<!-- Live Preview Section -->
+		{#if noteContent.trim()}
+			<div class="mb-6 rounded-md border border-gray-200 bg-gray-50 p-4">
+				<h3 class="mb-2 text-sm font-medium text-gray-700">Live Preview</h3>
+				<div class="prose prose-sm max-w-none">
+					{@html marked(noteContent)}
+				</div>
+			</div>
+		{/if}
+
 		<!-- Buttons -->
-		<div class="flex gap-4">
+		<div class="flex justify-end gap-4">
+			<button
+				type="button"
+				class="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:outline-none"
+				on:click={() => goto('/notes')}
+			>
+				Cancel
+			</button>
 			<button
 				on:click={saveNote}
 				disabled={loading || !noteContent.trim()}
@@ -289,29 +343,5 @@
 				{/if}
 			</button>
 		</div>
-	</div>
-
-	<!-- Tips Section -->
-	<div class="rounded-lg border border-gray-200 bg-gray-50 p-6">
-		<h3 class="mb-3 text-lg font-medium text-gray-900">Tips for Effective Notes</h3>
-		<ul class="list-inside list-disc space-y-2 text-gray-600">
-			<li>
-				<strong>Be specific and concise</strong> - Focus on key concepts, definitions, and relationships
-			</li>
-			<li>
-				<strong>Use clear structure</strong> - Organize content with headings, bullet points, or numbered
-				lists
-			</li>
-			<li>
-				<strong>Include important details</strong> - Dates, names, formulas, and key terminology
-			</li>
-			<li>
-				<strong>Keep it focused</strong> - Stick to one topic or subject area per note for better flashcards
-			</li>
-			<li>
-				<strong>Review before generating</strong> - Check for accuracy and completeness before generating
-				flashcards
-			</li>
-		</ul>
 	</div>
 </div>
