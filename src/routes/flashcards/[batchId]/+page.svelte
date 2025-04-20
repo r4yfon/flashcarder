@@ -213,7 +213,7 @@
 				{:else}
 					<!-- Display Mode -->
 					<h1 class="flex-grow text-2xl font-bold text-gray-900">
-						Flashcards from: {batch.noteTitle || 'Untitled Note'}
+						{batch.noteTitle || 'Untitled Note'}
 						{#if batch.noteId}
 							<a
 								href="/notes/{batch.noteId}"

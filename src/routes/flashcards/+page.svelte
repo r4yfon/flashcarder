@@ -102,7 +102,7 @@
 							<div class="flex items-center justify-between">
 								<div class="flex-grow pr-4">
 									<h2 class="truncate text-lg font-medium text-gray-900">
-										Batch from: {batch.noteTitle || 'Unknown Note'}
+										{batch.noteTitle || 'Unknown Note'}
 										{#if batch.noteId}
 											<span
 												title="View Note"
