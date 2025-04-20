@@ -15,8 +15,9 @@ export function formatDate(dateInput: string | Date | undefined | null): string 
 			year: 'numeric',
 			month: 'short',
 			day: 'numeric',
-			hour: 'numeric',
-			minute: '2-digit'
+			hour: '2-digit',
+			minute: '2-digit',
+			hour12: true
 		});
 	} catch (e) {
 		return 'Invalid Date';
